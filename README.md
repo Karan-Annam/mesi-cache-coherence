@@ -94,6 +94,5 @@ docs/         DESIGN.md, BUILDING.md, images
 
 ## AI Use and Tooling
 
-Built with AI assistance (Claude Code) from a spec and design I wrote, with
-me hand-writing the harder modules and doing the verification myself. More
-on that split, and the toolchain, in [TOOLING.md](TOOLING.md).
+Wrote the RTL with AI assistance, debugged it myself, and read through it to
+modify things. More on that, and the toolchain, in [TOOLING.md](TOOLING.md).

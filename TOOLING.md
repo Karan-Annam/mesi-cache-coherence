@@ -14,16 +14,10 @@ Host quirks (MSYS2 PATH ordering, a broken Perl `verilator` wrapper) are in
 
 ## AI use
 
-Built with Claude Code from a spec and design I put together, alongside my
-own work on the harder pieces, the MESI FSM's race handling and the
-sequential-consistency checker in particular. I made the calls on scope and
-what to verify, and went through the rest of the code closely rather than
-taking it as-is.
-
-Also fixed a real bug in the TSO litmus tests along the way: message passing
-doesn't actually need a fence under a FIFO store buffer (a common
-misconception), so the suite now tests that directly instead of assuming it
-does. Details in [docs/DESIGN.md](docs/DESIGN.md).
+I wrote the RTL and the C++ model with AI assistance, then debugged it
+myself and read through it to modify things as needed, the MESI FSM's race
+handling and the sequential-consistency checker in particular took a few
+passes to get right.
 
 Ask me about the MESI FSM, the SC checker, or the store buffer, happy to go
 deeper on any of it.
