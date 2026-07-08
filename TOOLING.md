@@ -32,3 +32,12 @@ Fixed that, and the suite now covers both cases. More in
 
 Happy to talk through any part of this in more depth, the MESI FSM, the SC
 checker, the TSO store buffer, whatever's useful.
+
+## Documentation
+
+Worth saying plainly rather than leaving it implied: the docs in this repo
+(README, DESIGN.md, this file) were drafted with the same AI assistance and
+then edited by me for accuracy, not written from scratch by hand. Across four
+projects that all got this treatment, the writing ends up reading pretty
+consistent in structure and tone, and I'd rather say that directly than have
+it look like I'm pretending otherwise.

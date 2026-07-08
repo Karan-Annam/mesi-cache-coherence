@@ -94,5 +94,5 @@ docs/         DESIGN.md, BUILDING.md, images
 
 ## Tooling
 
-Build toolchain, AI-assisted coding, and what I wrote and fixed by hand are
-covered in [TOOLING.md](TOOLING.md).
+Build toolchain, AI-assisted coding, and how the docs themselves were written
+are covered in [TOOLING.md](TOOLING.md).
