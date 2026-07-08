@@ -94,5 +94,5 @@ docs/         DESIGN.md, BUILDING.md, images
 
 ## AI Use and Tooling
 
-Wrote the RTL with AI assistance, debugged it myself, and read through it to
-modify things. More on that, and the toolchain, in [TOOLING.md](TOOLING.md).
+These docs were drafted with AI assistance and edited by me. Code-level AI
+use and the build toolchain are in [TOOLING.md](TOOLING.md).
