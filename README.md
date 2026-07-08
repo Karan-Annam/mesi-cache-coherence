@@ -26,7 +26,7 @@ Five layers, each tested against the one below:
 - [Results](#results)
 - [Protocol scope](#protocol-scope)
 - [Layout](#layout)
-- [Tooling](#tooling)
+- [AI Use and Tooling](#ai-use-and-tooling)
 
 ## Quick start
 
@@ -92,7 +92,9 @@ analysis/     plot scripts (matplotlib, ASCII fallback)
 docs/         DESIGN.md, BUILDING.md, images
 ```
 
-## Tooling
+## AI Use and Tooling
 
-Build toolchain, AI-assisted coding, and how the docs themselves were written
-are covered in [TOOLING.md](TOOLING.md).
+Up front: I used AI (Claude Code) throughout this project, for the code and
+for these docs, this section included. I wrote the spec, drove the build,
+and reviewed and edited everything before it shipped. The build toolchain
+and a real bug that came out of the process are in [TOOLING.md](TOOLING.md).

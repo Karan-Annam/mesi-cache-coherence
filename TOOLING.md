@@ -1,7 +1,5 @@
 # Tooling
 
-What actually went into building, verifying, and writing this up.
-
 ## Build and verification
 
 - Verilator 5.x for the RTL simulation
@@ -15,29 +13,25 @@ What actually went into building, verifying, and writing this up.
 Host-specific gotchas (MSYS2 PATH ordering, a broken Perl `verilator`
 wrapper) are covered in [docs/BUILDING.md](docs/BUILDING.md).
 
-## AI-assisted coding
+## Where I actually put in the work
 
-I used Claude Code as a coding tool throughout this project, the way a lot of
-people now pair-program with an LLM. I wrote the spec, ran the build, and
-hand-wrote several of the trickier modules myself, including the MESI FSM's
-race handling and the sequential-consistency checker. I read through and
-understood everything else before it shipped.
+The code and the docs in this repo, including this file, were built with AI
+assistance (Claude Code) and then reviewed and edited by me, not typed out
+from nothing by hand. I wrote the spec, drove the build, and made the calls
+on scope and verification. I hand-wrote the modules where getting it wrong
+would be easy to miss, in particular the MESI FSM's race handling (the
+BusUpgr race is the one that trips people up) and the sequential-consistency
+checker. Everything else I read closely enough to actually understand before
+it shipped, not just skim past.
 
-One thing that came out of building this: the TSO litmus tests originally
-assumed message passing needs a fence, which is a common misconception. A
-FIFO store buffer preserves store-to-store order, so message passing is
-actually fine unfenced under real x86-TSO. TSO only reorders store-to-load.
-Fixed that, and the suite now covers both cases. More in
-[docs/DESIGN.md](docs/DESIGN.md).
+The clearest proof of that: the TSO litmus tests originally assumed message
+passing needs a fence, which is a common claim people repeat without
+checking it. A FIFO store buffer preserves store-to-store order, so message
+passing is actually fine unfenced under real x86-TSO, TSO only reorders
+store-to-load. I caught that mid-build and had it fixed properly: the suite
+now proves MP passes unfenced under the FIFO store buffer, and only breaks
+under a deliberately weakened RELAXED drain mode, where a fence repairs it.
+Full writeup in [docs/DESIGN.md](docs/DESIGN.md).
 
-Happy to talk through any part of this in more depth, the MESI FSM, the SC
-checker, the TSO store buffer, whatever's useful.
-
-## Documentation
-
-Worth saying plainly rather than leaving it implied: the docs in this repo
-(README, DESIGN.md, this file) were drafted with the same AI assistance and
-then edited by me for accuracy, not written from scratch by hand. Across four
-projects that all got this treatment, the writing ends up reading pretty
-consistent in structure and tone, and I'd rather say that directly than have
-it look like I'm pretending otherwise.
+Ask me about the MESI FSM, the SC checker, or the store buffer if you want to
+go deeper, I can talk through any of it.
