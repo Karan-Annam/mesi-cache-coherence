@@ -5,7 +5,7 @@
 - Verilator 5.x (tested with 5.040)
 - g++ with C++17 (tested with GCC 15, MSYS2 UCRT64)
 - GNU Make, bash
-- Python 3 for the analysis plots. matplotlib is optional — the scripts fall back
+- Python 3 for the analysis plots. matplotlib is optional, the scripts fall back
   to an ASCII summary if it isn't installed.
 
 ## Run everything
@@ -47,6 +47,6 @@ by hand:
    The compiled driver works fine, so the build calls `verilator_bin.exe` directly
    (`VERILATOR ?= verilator_bin.exe` in the Makefile).
 
-On Linux none of this applies — plain `verilator` + `g++` should just work.
+On Linux none of this applies. Plain `verilator` + `g++` should just work.
 
 Build artifacts land in `obj_dir/` and `build/`; both are gitignored.
