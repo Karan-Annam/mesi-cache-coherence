@@ -94,7 +94,6 @@ docs/         DESIGN.md, BUILDING.md, images
 
 ## AI Use and Tooling
 
-Up front: I used AI (Claude Code) throughout this project, for the code and
-for these docs, this section included. I wrote the spec, drove the build,
-and reviewed and edited everything before it shipped. The build toolchain
-and a real bug that came out of the process are in [TOOLING.md](TOOLING.md).
+Built with AI assistance (Claude Code) from a spec and design I wrote, with
+me hand-writing the harder modules and doing the verification myself. More
+on that split, and the toolchain, in [TOOLING.md](TOOLING.md).
