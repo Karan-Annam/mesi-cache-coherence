@@ -14,6 +14,7 @@
 #include <vector>
 #include <algorithm>
 #include <random>
+#include <stdexcept>
 #include "mesi_system.hpp"
 
 namespace mesi {
@@ -28,7 +29,12 @@ class StoreBuffer {
 public:
     StoreBuffer(MesiSystem* sys, int core, int depth = 8,
                 DrainMode mode = DrainMode::FIFO, uint64_t seed = 0)
-        : sys_(sys), core_(core), depth_(depth), mode_(mode), rng_(seed) {}
+        : sys_(sys), core_(core), depth_(depth), mode_(mode), rng_(seed) {
+        if (!sys_) throw std::invalid_argument("StoreBuffer needs a MESI system");
+        if (core_ < 0 || core_ >= sys_->n_cores())
+            throw std::out_of_range("store-buffer core id is invalid");
+        if (depth_ <= 0) throw std::invalid_argument("store-buffer depth must be positive");
+    }
 
     int depth() const { return depth_; }
     size_t size() const { return buf_.size(); }
@@ -36,8 +42,8 @@ public:
 
     // CPU store: enqueue. If full, drain the oldest entry (FIFO) to make room.
     void store(uint32_t addr, uint32_t val) {
-        // Coalesce: keep only the newest value per address for bypass clarity,
-        // but preserve ordering by appending (older duplicate stays for drain).
+        // Preserve every store in program order. Loads bypass the newest
+        // matching entry; older duplicates remain and drain in order.
         buf_.push_back({addr, val});
         if ((int)buf_.size() > depth_) drain_one();
     }

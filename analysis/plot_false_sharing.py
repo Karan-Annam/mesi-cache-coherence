@@ -37,7 +37,7 @@ def main():
         plt.ylabel("total bus transactions")
         plt.title("False sharing: the 64-byte cliff")
         plt.legend(); plt.grid(True, alpha=0.3); plt.tight_layout()
-        out = os.path.join(HERE, "false_sharing.png")
+        out = os.path.join(HERE, "..", "docs", "img", "false_sharing.png")
         plt.savefig(out)
         print("wrote", out)
     except Exception as e:

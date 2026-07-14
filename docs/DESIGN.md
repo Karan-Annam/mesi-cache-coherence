@@ -1,157 +1,117 @@
-# Design notes
+# Design Notes
 
-This is a tour of how the project is put together and why. If you just want to
-run it, see [BUILDING.md](BUILDING.md).
+## MESI transitions
 
-The project is built as five layers, each one sitting on the one below:
+Each cache line is Modified, Exclusive, Shared, or Invalid. The model and RTL
+implement the same processor and snoop rules:
 
-1. a C++ behavioral model of MESI (protocol correctness, checked by a
-   sequential-consistency checker)
-2. the same protocol in synthesizable SystemVerilog with a snooping bus
-3. a workload library that stresses specific protocol behaviors
-4. atomics (CAS / fetch-and-add) and synchronization primitives built on them
-5. a TSO store buffer and litmus tests that show why memory fences exist
+| Current state | Event | Next state | Bus action |
+|---|---|---|---|
+| I | processor read, no peer copy | E | `BusRd` |
+| I | processor read, peer has copy | S | `BusRd` |
+| I | processor write | M | `BusRdX` |
+| S | processor write | M | `BusUpgr` |
+| E | processor write | M | none |
+| M | snooped `BusRd` | S | dirty writeback |
+| E | snooped `BusRd` | S | none |
+| M/E/S | snooped `BusRdX` | I | M writes back |
+| S | snooped `BusUpgr` | I | none |
 
-The point of doing all five in one project: most people either know the hardware
-side (MESI state machines) or the software side (`std::atomic`, spinlocks) but
-not how one produces the other. Building the stack end to end forces you to see,
-for example, exactly why a CAS is a bus-locked read-modify-write, or why false
-sharing costs what it costs.
+Dirty intervention writes an M-state value to memory before the requesting
+cache fills. A losing shared copy that snoops another core's `BusUpgr` becomes
+Invalid, so any later write must request ownership with `BusRdX`.
 
-## The protocol
+## C++ model
 
-Standard MESI. Every line in every L1 is Modified, Exclusive, Shared, or
-Invalid. The interesting rules:
+`cache_controller.cpp` owns the per-core state transitions.
+`snooping_bus.cpp` broadcasts one transaction to the peer controllers, updates
+performance counters, and advances an observable arbitration pointer. The
+behavioral API does not queue simultaneous requesters or use that pointer to
+select a winner: `MesiSystem` serializes each complete read, write, or atomic
+operation with one mutex. Threads can call the API concurrently, but their
+modeled memory operations therefore have a total order.
 
-| From | Event | To | Bus |
-|------|-------|----|-----|
-| I | PrRd, nobody else has it | E | BusRd |
-| I | PrRd, someone has it | S | BusRd |
-| I | PrWr | M | BusRdX |
-| S | PrWr | M | BusUpgr |
-| E | PrWr | M | (silent, the whole point of E) |
-| M | snooped BusRd | S | BusWB first (dirty intervention) |
-| M/E/S | snooped BusRdX | I | none |
-| S | snooped BusUpgr | I | none |
+The optional race-injection mode shuffles peer snoop visitation within that
+serialized transaction. It catches accidental dependence on visitation order;
+it does not create overlapping bus transactions.
 
-The correctness challenge is the races. Two caches can decide to issue a request
-in the same cycle; the bus serializes them, and the loser has to react to the
-winner's transaction correctly. The two that matter:
+The model registers every touched word within a 64-byte line, allowing a line
+transfer or writeback to carry all known words. That is how the false-sharing
+workload distinguishes adjacent words even though the RTL payload is narrower.
 
-- **Simultaneous BusRdX**: both in I, both want to write. One wins arbitration,
-  the other snoops the winning BusRdX and must retry from scratch.
-- **BusUpgr race**: both in S, both want to upgrade. The loser sees the winning
-  BusUpgr and drops to I. It can't just retry the BusUpgr, because it no
-  longer holds the line, so it has to re-issue as a full BusRdX. Getting this
-  wrong is the classic MESI implementation bug.
+Tracing records the serialized operations and per-core program indices. The SC
+checker validates reads against that order and also includes a brute-force
+checker for small synthetic traces.
 
-Dirty intervention is the third tricky case: a BusRd hitting a line that some
-other cache holds in M. The M-holder has to write back before the requester can
-be served, or the requester reads stale memory.
+## RTL
 
-## Layer 1: the C++ model (`model/`)
+`mesi_top.sv` instantiates four `l1_cache` blocks, the snooping bus, memory
+controller, and counters. Each L1 contains a direct-mapped cache array and a
+combinational `mesi_fsm`; request sequencing lives in the cache and bus
+interface modules.
 
-`cache_controller.{hpp,cpp}` implements every transition above per core;
-`snooping_bus.{hpp,cpp}` serializes transactions with a round-robin arbitration
-pointer and broadcasts snoops. There's also a race-injection mode that randomizes
-snoop ordering, which is how I gained confidence the race handling is right:
-the SC check runs 50 times, some with injection, and any violation fails the
-suite.
+The Verilator wrapper also instantiates standalone copies of the MESI FSM,
+store buffer, and CPU stimulus block. Directed checks cover the transition
+table, dirty intervention, cache and bus behavior, the stimulus modes, and the
+store-buffer FIFO, bypass, simultaneous push/pop, full, reset, and fence paths.
 
-The piece that makes the upper layers work is `mesi_system.hpp`. It wraps the
-whole model in a thread-safe facade (`read / write / cas / fetch_and_add /
-fence`), serialized by a bus mutex, so **real OS threads** can hammer the
-coherent memory concurrently. That's how the lock and lock-free tests get real
-interleavings rather than simulated ones, while the model keeps exact coherence
-accounting underneath.
+The RTL and C++ transition tables are intentionally aligned, but the current
+testbench checks each implementation against directed expectations rather than
+running a cycle-by-cycle differential comparison.
 
-The SC checker (`sc_checker.{hpp,cpp}`) verifies that every read returns the
-value of the most recent write in some total order consistent with each core's
-program order. Since the bus already produces a total order, the fast path just
-linearizes against the recorded serialization; a brute-force search over small
-traces exists mostly to validate the checker itself.
+The current RTL cache has 64 direct-mapped sets and one 32-bit payload per
+64-byte-addressed line. A conflicting fill does not write an evicted dirty line
+back to memory. Tests avoid that conflict case. The standalone RTL store buffer
+is not inserted between the CPU stimulus and L1 datapath.
 
-## Layer 2: the RTL (`rtl/`)
+## Atomics and synchronization
 
-```
-mesi_top (N=4)
-├── snooping_bus       arbitration + snoop aggregation + dirty writeback
-├── memory_controller
-└── l1_cache ×4
-    ├── cache_array    direct-mapped tag/state/data, 3 read ports
-    ├── mesi_fsm       pure combinational next-state/action logic
-    ├── bus_interface  request issue + round-robin grant handling
-    └── cpu_stub       stimulus: SEQUENTIAL / SHARED_RW / FALSE_SHARE
-```
+`MesiSystem::cas` and `fetch_and_add` acquire exclusive ownership and hold the
+model's bus mutex over the complete read-modify-write. Fetch-and-add is a direct
+bus-serialized RMW, not a CAS retry loop.
 
-The FSM mirrors the C++ model transition for transition (same state encoding,
-deliberately). The bus resolves one transaction per cycle. That's centralized
-and simple, but it genuinely serializes, which is all the races need.
+The primitive tests exercise TAS and ticket locks, a seqlock, a
+sense-reversing barrier, and a Treiber stack from multiple OS threads. The stack
+uses a monotonically increasing node allocator; popped nodes are not recycled,
+which avoids ABA in this bounded test without providing memory reclamation.
 
-Verilator's top is a thin wrapper (`sim/mesi_tb_top.sv`) that instantiates the
-real `mesi_top` plus standalone copies of `mesi_fsm`, `store_buffer`, and
-`cpu_stub` for unit testing, with packed ports so the C++ testbench can poke
-them cleanly. 58 checks cover every directed transition (I→E, I→S, silent E→M,
-S→M via BusUpgr, I→M, and both dirty-intervention paths), the full FSM table,
-the store buffer, and the stimulus modes.
+`HazardDomain` is tested separately. Threads publish a protected pointer in
+coherent memory, revalidate the source pointer, and clear their slots after use.
+It demonstrates the coherence pattern used by hazard pointers but is not wired
+into the Treiber stack.
 
-Simplifications I chose and would fix in a longer project:
+## Store buffers and TSO
 
-- Lines hold one 32-bit word. Every transition is exercised, but sub-line
-  false-sharing effects are quantified in the C++ model (which tracks words
-  within a line), not the RTL.
-- No eviction writeback. A conflicting fill overwrites the set. Tests use
-  distinct sets to stay away from it.
-- The atomics (layer 4) and the end-to-end TSO demos (layer 5) run against the
-  C++ model, not the RTL datapath. `store_buffer.sv` is implemented and
-  unit-tested standalone, but splicing it between `cpu_stub` and `l1_cache` is
-  future work, as is wiring CAS pins through the RTL pipeline.
+`model/tso.hpp` gives each modeled core an owner-thread-only store buffer.
+Stores enqueue, loads search newest-to-oldest for a matching address, and an
+MFENCE drains all entries in FIFO order. FIFO drain preserves store-to-store
+order while allowing a later load to observe memory before an older store has
+become visible to another core.
 
-## Layer 3: workloads (`sim/workloads.hpp`)
+The store-buffering/Dekker harness deliberately schedules stores and loads so
+the TSO-permitted outcome occurs in all 500 unfenced trials. Draining both
+buffers at the fence removes that outcome in all 500 fenced trials. These
+counts verify the modeled mechanism; they should not be interpreted as a
+probability measured on physical hardware.
 
-Ping-pong (two cores alternately writing one line), false sharing (padded vs
-unpadded), producer/consumer, reader storm, and a sense-reversing barrier. Each
-exists to light up one protocol behavior in the counters. Measured numbers are
-in the README; the one worth repeating is false sharing: 399 bus transactions
-per 100 iterations sharing a line, 2 when padded one line apart. That ~200×
-cliff at a 64-byte boundary is the whole false-sharing lesson in one number.
+Message passing succeeds under FIFO drain because the data store reaches memory
+before the flag store. A separate `RELAXED` mode randomly drains entries out of
+order to model a weaker memory system; that mode can violate message passing,
+and a full ordered drain repairs it.
 
-## Layer 4: atomics and primitives (`primitives/`)
+`rtl/store_buffer.sv` implements the FIFO subset. While `fence_req` is asserted,
+younger stores are blocked and `fence_ack` rises only after all older entries
+have drained.
 
-`MesiSystem::cas` does exactly what hardware CAS does: BusRdX to get the line in
-M, hold the bus lock across the compare and the conditional write, release.
-Fetch-and-add is a CAS retry loop. On top of those: a test-and-set spinlock, a
-ticket lock, a seqlock, hazard pointers, and a Treiber lock-free stack, all
-exercised by concurrent OS threads through the coherent model, checked for lost
-or duplicated values.
+## Verification
 
-## Layer 5: TSO (`model/tso.hpp`, `rtl/store_buffer.sv`)
+`bash run_all.sh` performs four stages:
 
-Each core gets a store buffer: stores enter it instead of the cache, drain
-asynchronously, and loads check it first (so a core sees its own stores early).
-That single structure is what makes x86-TSO weaker than sequential consistency,
-and Dekker's algorithm is the litmus test: without fences, both cores read the
-other's stale flag and mutual exclusion breaks **100% of the time** in this
-implementation; insert MFENCE (drain the buffer before the load) and it breaks
-never.
+1. 41 C++ model, workload, atomic, primitive, and TSO tests.
+2. The measurement driver and its internal assertions.
+3. A Verilator build followed by 59 directed RTL checks.
+4. Three analysis scripts; they write PNGs when matplotlib is installed and
+   print the measured values otherwise.
 
-One correction I had to make while building this: the common claim that message
-passing (write data, write flag / read flag, read data) needs a fence under TSO
-is wrong. A FIFO store buffer preserves store→store order, so MP is correctly
-ordered on real x86 without any fence. TSO's only relaxation is store→load.
-The suite asserts MP *passes* under the FIFO buffer, then demonstrates the
-violation under an added RELAXED drain mode (a deliberately weaker model), and
-shows the fence repairing it there.
-
-## Verification approach
-
-Same story at every layer: a golden reference and a diff.
-
-- The C++ model is checked by the SC checker (linearization + race injection).
-- The RTL is checked against directed expectations that mirror the model's
-  transition table, using the same state encoding.
-- The threaded tests (layers 3–5) are run 10× back to back in CI-style to shake
-  out flakiness; results were stable.
-
-The full suite is `bash run_all.sh`. Exit 0 means the model tests (38), the
-demo run, the RTL testbench (58 checks), and the plots all succeeded.
+`make lint` runs Verilator's lint-only path separately. There is currently no
+FPGA/ASIC synthesis, post-route timing, power, or area result in this repository.

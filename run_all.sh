@@ -2,15 +2,24 @@
 # Build and run the full test suite (C++ model + RTL). Exit 0 = everything passed.
 set -u
 
-# MSYS2: ucrt64 must be first on PATH or cc1plus silently dies (docs/BUILDING.md).
-export PATH="/c/msys64/ucrt64/bin:$PATH"
-# The Perl verilator wrapper is broken on some MSYS2 installs; call the binary.
-export VERILATOR_ROOT="${VERILATOR_ROOT:-C:/msys64/ucrt64/share/verilator}"
-
-VERILATOR_BIN="${VERILATOR_BIN:-verilator_bin.exe}"
+# MSYS2 needs both its Unix utilities and UCRT64 toolchain. Leave Linux/macOS
+# environments untouched and use the normal Verilator driver there.
+if [ -d /c/msys64/ucrt64/bin ]; then
+    export PATH="/c/msys64/ucrt64/bin:/usr/bin:$PATH"
+    export VERILATOR_ROOT="${VERILATOR_ROOT:-C:/msys64/ucrt64/share/verilator}"
+    VERILATOR_BIN="${VERILATOR_BIN:-verilator_bin.exe}"
+else
+    VERILATOR_BIN="${VERILATOR_BIN:-verilator}"
+fi
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 mkdir -p build
+# Keep compiler temporaries inside the repository. This also avoids relying on
+# a writable global MSYS2 /tmp when the project runs in a restricted shell.
+mkdir -p build/tmp
+export TMPDIR="$ROOT/build/tmp"
+export TMP="$TMPDIR"
+export TEMP="$TMPDIR"
 
 CXX=g++
 CXXFLAGS="-std=c++17 -O2 -Wall -Wextra -pthread -I model -I sim -I primitives"
@@ -21,8 +30,8 @@ echo "============================================================"
 echo " STAGE 1 — C++ behavioral model + higher-layer test suite"
 echo "============================================================"
 MODEL_SRCS="model/cache_controller.cpp model/snooping_bus.cpp model/sc_checker.cpp"
-TEST_SRCS=$(ls sim/tests/*.cpp)
-if $CXX $CXXFLAGS $MODEL_SRCS $TEST_SRCS -o build/model_tests; then
+TEST_SRCS=(sim/tests/*.cpp)
+if $CXX $CXXFLAGS $MODEL_SRCS "${TEST_SRCS[@]}" -o build/model_tests; then
     if ./build/model_tests; then
         echo "[stage1] PASS"
     else

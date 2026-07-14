@@ -2,6 +2,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include <stdexcept>
 #include "dut.hpp"
 
 namespace mesi {
@@ -16,9 +17,16 @@ struct HazardDomain {
     uint32_t hazard_base;
     int n_threads;
 
+    HazardDomain(uint32_t base, int threads)
+        : hazard_base(base), n_threads(threads) {
+        if (threads <= 0)
+            throw std::invalid_argument("HazardDomain needs at least one thread");
+    }
+
     // Acquire-and-protect: load *ptr_addr, publish it, re-validate. Returns the
     // protected pointer (0 means null).
     uint32_t protect(const Dut& d, int tid, uint32_t ptr_addr) const {
+        validate_tid(tid);
         for (;;) {
             uint32_t p = d.read(ptr_addr);
             d.write(hazard_base + 4u * tid, p);
@@ -28,6 +36,7 @@ struct HazardDomain {
     }
 
     void release(const Dut& d, int tid) const {
+        validate_tid(tid);
         d.write(hazard_base + 4u * tid, 0);
     }
 
@@ -36,6 +45,12 @@ struct HazardDomain {
         for (int t = 0; t < n_threads; ++t)
             if (d.read(hazard_base + 4u * t) == ptr) return true;
         return false;
+    }
+
+private:
+    void validate_tid(int tid) const {
+        if (tid < 0 || tid >= n_threads)
+            throw std::out_of_range("hazard-pointer thread id is invalid");
     }
 };
 

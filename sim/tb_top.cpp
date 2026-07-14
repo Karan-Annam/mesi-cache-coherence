@@ -86,7 +86,10 @@ static void test_store_buffer(Vmesi_tb_top* top, Driver& drv) {
     top->sb_bypass_addr = 0x30; top->eval();
     CHECK(!top->sb_bypass_hit, "bypass 0x30 -> miss");
 
-    CHECK(!top->sb_fence_ack, "fence not acked while non-empty");
+    top->sb_fence_req = 1;
+    top->eval();
+    CHECK(!top->sb_fence_ack && top->sb_full,
+          "pending fence blocks stores and waits for drain");
 
     // drain in FIFO order
     top->sb_drain_ready = 1;
@@ -99,7 +102,8 @@ static void test_store_buffer(Vmesi_tb_top* top, Driver& drv) {
     CHECK(top->sb_drain_addr == 0x10 && top->sb_drain_data == 333, "drain[2] = (0x10,333)"); tick();
     drv.settle();
     CHECK(top->sb_count == 0 && top->sb_fence_ack, "buffer empty -> fence_ack");
-    top->sb_drain_ready = 0; top->eval();
+    top->sb_fence_req = 0; top->sb_drain_ready = 0; top->eval();
+    CHECK(!top->sb_fence_ack, "fence ack deasserts with fence request");
 }
 
 // ---------------- cpu_stub unit test ----------------

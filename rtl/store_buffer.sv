@@ -40,11 +40,12 @@ module store_buffer #(
     logic [CNTW-1:0]   cnt;
 
     assign count   = cnt;
-    assign sb_full = (cnt == CNTW'(DEPTH));
+    // A fence blocks younger stores until all older entries have drained.
+    assign sb_full = (cnt == CNTW'(DEPTH)) || fence_req;
     assign drain_valid = (cnt != 0);
     assign drain_addr  = addr_q[head];
     assign drain_data  = data_q[head];
-    assign fence_ack   = (cnt == 0);
+    assign fence_ack   = fence_req && (cnt == 0);
 
     // Bypass: newest matching entry wins. Scan from tail-1 back to head.
     always_comb begin
@@ -61,7 +62,7 @@ module store_buffer #(
         end
     end
 
-    wire do_push = st_valid && (cnt != CNTW'(DEPTH));
+    wire do_push = st_valid && !sb_full;
     wire do_pop  = drain_valid && drain_ready;
 
     always_ff @(posedge clk or negedge rst_n) begin

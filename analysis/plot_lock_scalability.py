@@ -13,30 +13,34 @@ def main():
     if not os.path.exists(CSV):
         print("no lock_scalability.csv (run model_main first)")
         return 0
-    cores, txns = [], []
+    cores, med, lo, hi = [], [], [], []
     with open(CSV) as f:
         for r in csv.DictReader(f):
             cores.append(int(r["cores"]))
-            txns.append(int(float(r["total_bus_txns"])))
+            med.append(float(r["median_bus_txns_per_acq"]))
+            lo.append(float(r["min_bus_txns_per_acq"]))
+            hi.append(float(r["max_bus_txns_per_acq"]))
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         plt.figure(figsize=(7, 4))
-        plt.plot(cores, txns, marker="s", color="purple")
+        err = [[m - l for m, l in zip(med, lo)],
+               [h - m for m, h in zip(med, hi)]]
+        plt.errorbar(cores, med, yerr=err, marker="s", capsize=4, color="purple")
         plt.xlabel("competing cores")
-        plt.ylabel("total bus transactions")
-        plt.title("TAS spinlock: coherence traffic vs. contention")
+        plt.ylabel("bus transactions per lock acquisition")
+        plt.title("TAS spinlock coherence traffic (7-trial median/range)")
         plt.grid(True, alpha=0.3); plt.tight_layout()
-        out = os.path.join(HERE, "lock_scalability.png")
+        out = os.path.join(HERE, "..", "docs", "img", "lock_scalability.png")
         plt.savefig(out)
         print("wrote", out)
     except Exception as e:
         print("[matplotlib unavailable: %s] ASCII summary:" % e)
-        mx = max(txns) or 1
-        for c, t in zip(cores, txns):
-            bar = "#" * int(50 * t / mx)
-            print(f"  cores={c}  txns={t:6d} |{bar}")
+        mx = max(med) or 1
+        for c, m, l, h in zip(cores, med, lo, hi):
+            bar = "#" * int(50 * m / mx)
+            print(f"  cores={c}  txns/acq={m:.4f} [{l:.4f}, {h:.4f}] |{bar}")
     return 0
 
 

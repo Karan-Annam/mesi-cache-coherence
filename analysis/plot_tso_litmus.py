@@ -24,9 +24,9 @@ def main():
         plt.figure(figsize=(6, 4))
         plt.bar(labels, rates, color=["crimson", "seagreen"])
         plt.ylabel("Dekker mutual-exclusion violation rate")
-        plt.title("TSO store buffer: SB litmus violations")
+        plt.title("Controlled TSO store-buffer litmus")
         plt.ylim(0, 1.05); plt.grid(True, axis="y", alpha=0.3); plt.tight_layout()
-        out = os.path.join(HERE, "tso_litmus.png")
+        out = os.path.join(HERE, "..", "docs", "img", "tso_litmus.png")
         plt.savefig(out)
         print("wrote", out)
     except Exception as e:

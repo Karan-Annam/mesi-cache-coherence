@@ -2,9 +2,13 @@
 # On MSYS2 use `bash run_all.sh` (fixes PATH ordering + calls verilator_bin.exe
 # directly) — see docs/BUILDING.md.
 
-VERILATOR     ?= verilator_bin.exe
+ifeq ($(OS),Windows_NT)
+VERILATOR      ?= verilator_bin.exe
 VERILATOR_ROOT ?= C:/msys64/ucrt64/share/verilator
 export VERILATOR_ROOT
+else
+VERILATOR      ?= verilator
+endif
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -pthread -I model -I sim -I primitives

@@ -1,32 +1,25 @@
-# MESI cache coherence, top to bottom
+# MESI Cache Coherence, from RTL to Synchronization
 
-I wanted to understand what actually happens in hardware when you use
-`std::atomic` or take a mutex, so I built the whole stack: the MESI protocol as
-a C++ model and as synthesizable SystemVerilog, then the things you build on top
-of it: hardware CAS, spinlocks, a lock-free stack, and an x86-style TSO store
-buffer with the litmus tests that show why memory fences exist.
+This project connects cache-coherence behavior to the software primitives built
+on top of it. It contains an instrumented C++ MESI model, an independent
+four-core SystemVerilog implementation, multithreaded synchronization tests,
+and FIFO store-buffer models used to exercise TSO litmus tests.
 
-Five layers, each tested against the one below:
+## What is implemented
 
-1. **C++ behavioral model** of MESI with a snooping bus, plus a
-   sequential-consistency checker and race injection (`model/`)
-2. **SystemVerilog RTL**: cache array, MESI FSM, snooping bus, 4-core system,
-   lint clean (`rtl/`)
-3. **Workloads** that stress specific protocol behavior: ping-pong, false
-   sharing, producer/consumer, reader storm, barrier (`sim/workloads.hpp`)
-4. **Atomics + sync primitives**: CAS and fetch-and-add as bus-locked RMW, then
-   TAS lock, ticket lock, seqlock, hazard pointers, Treiber stack, all driven by
-   real OS threads (`primitives/`)
-5. **TSO store buffer** + Dekker and message-passing litmus tests
-   (`model/tso.hpp`, `rtl/store_buffer.sv`)
+- A word-addressable C++ MESI model with `BusRd`, `BusRdX`, `BusUpgr`, dirty
+  intervention, per-core counters, tracing, and a sequential-consistency checker.
+- A four-core RTL system with a direct-mapped L1, MESI FSM, snooping bus, memory
+  controller, performance counters, and a standalone FIFO store buffer.
+- Bus-serialized CAS and fetch-and-add, then TAS/ticket locks, a seqlock, a
+  barrier, a Treiber stack, and a separately tested hazard-pointer domain.
+- FIFO TSO and deliberately weaker out-of-order drain models for store-buffering
+  and message-passing litmus tests.
 
-## Contents
-
-- [Quick start](#quick-start)
-- [Results](#results)
-- [Protocol scope](#protocol-scope)
-- [Layout](#layout)
-- [AI Use and Tooling](#ai-use-and-tooling)
+The C++ facade accepts calls from real OS threads, while a mutex gives each
+modeled memory operation a total bus order. Randomized snoop visitation changes
+the order in which a serialized transaction reaches peer caches; it is a stress
+mode, not a model of simultaneous bus grants.
 
 ## Quick start
 
@@ -34,67 +27,67 @@ Five layers, each tested against the one below:
 bash run_all.sh
 ```
 
-Builds and runs everything: 38 model/primitive/TSO tests, the demo runner, the
-Verilator RTL testbench (58 checks), and the analysis plots. Exit 0 means all of
-it passed. Needs Verilator 5.x and a C++17 g++. On Windows/MSYS2 read
-[docs/BUILDING.md](docs/BUILDING.md) first, there are two PATH-related traps.
+The command builds and runs 41 C++ model/primitive tests, the measurement
+driver, and 59 Verilator RTL checks, then renders the plots when matplotlib is
+available. Requirements and individual targets are in
+[docs/BUILDING.md](docs/BUILDING.md).
 
-## Results
+## Measured behavior
 
-**False sharing is a 64-byte cliff.** Two cores incrementing adjacent words on
-the same cache line cost 399 bus transactions per 100 iterations. Pad the words
-one line apart and it drops to 2.
+Two cores each perform 100 writes. Keeping their target words on one 64-byte
+line produces 399 modeled bus transactions; placing the words on separate lines
+produces 2.
 
-![false sharing](docs/img/false_sharing.png)
+![False-sharing traffic](docs/img/false_sharing.png)
 
-**Lock contention is coherence traffic.** Bus transactions per lock acquisition
-grow steeply with the number of competing cores:
+For a TAS spinlock, seven trials at each core count show the median modeled bus
+traffic per acquisition rising from 0.0040 with one core to 0.0455 with four.
+The
+error bars show the measured min/max range rather than hiding scheduler
+variation.
 
-![lock scalability](docs/img/lock_scalability.png)
+![TAS spinlock traffic](docs/img/lock_scalability.png)
 
-**TSO breaks Dekker without fences.** With the store buffer enabled, Dekker's
-algorithm violates mutual exclusion 100% of the time; with MFENCE, never.
+In the controlled store-buffering harness, all 500 unfenced trials expose the
+permitted TSO outcome and none of 500 fenced trials do. This is a deterministic
+model test, not an empirical violation rate measured on an x86 processor.
 
-![tso litmus](docs/img/tso_litmus.png)
+![Controlled TSO litmus](docs/img/tso_litmus.png)
 
-Other numbers from the counters: ping-pong writes cost one BusRdX plus one
-invalidation each (200 writes → 200 BusRdX, 199 writebacks); a 4-core reader
-storm ends with 4 BusRd, 0 BusRdX, all lines Shared.
+The measurement driver also checks 100 ping-pong rounds (200 `BusRdX`, 199
+writebacks) and a four-core reader workload (4 `BusRd`, 0 `BusRdX`). Raw data is
+written under `analysis/` by `make model`.
 
-One thing I got to correct along the way: message passing does *not* need a
-fence under real TSO. A FIFO store buffer preserves store→store order, so the
-usual textbook claim is wrong. The suite proves MP passes under FIFO TSO and
-only breaks under a deliberately weakened out-of-order drain mode. Details in
-[docs/DESIGN.md](docs/DESIGN.md).
+## Design scope
 
-## Protocol scope
+The C++ and RTL implementations share the MESI transition rules but are tested
+independently; this repository does not claim cycle-by-cycle differential
+verification. The RTL cache stores one 32-bit payload per 64-byte line and does
+not write back a dirty line on a conflicting-set eviction. Atomics and the TSO
+end-to-end tests run on the C++ model. `rtl/store_buffer.sv` is verified as a
+standalone unit and is not connected to the full cache datapath.
 
-States M/E/S/I with BusRd, BusRdX, BusUpgr, and BusWB transactions. The FSM
-(`rtl/mesi_fsm.sv`, mirrored by `model/cache_controller.cpp`) covers every
-processor- and snoop-initiated transition, including dirty intervention
-(M-state writeback on a snooped read) and the BusUpgr to BusRdX race, which is
-the one everybody gets wrong the first time.
+The Treiber stack uses monotonic allocation and never reuses popped nodes, so
+its test avoids ABA without reclamation. The hazard-pointer domain is a separate
+coherence workload rather than the stack's allocator.
 
-Known simplifications: the RTL cache is direct-mapped with one word per line,
-there's no eviction writeback, and the atomics/TSO layers run against the C++
-model rather than being wired through the RTL datapath (the store buffer exists
-in RTL but is unit-tested standalone). All listed with reasoning in
-[docs/DESIGN.md](docs/DESIGN.md).
+See [docs/DESIGN.md](docs/DESIGN.md) for implementation details and
+[docs/STATE_AND_ROADMAP.md](docs/STATE_AND_ROADMAP.md) for the next milestones.
 
-## Layout
+## Repository layout
 
-```
-model/        C++ behavioral model, SC checker, TSO store buffer
-rtl/          SystemVerilog: FSM, cache, bus, memory, store buffer
-sim/          Verilator testbench + workload library
-primitives/   spinlocks, seqlock, hazard pointers, lock-free stack
-analysis/     plot scripts (matplotlib, ASCII fallback)
-docs/         DESIGN.md, BUILDING.md, images
+```text
+model/        C++ MESI model, SC checker, and TSO store buffer
+rtl/          SystemVerilog cache, FSM, bus, memory, and store buffer
+sim/          C++/Verilator tests and coherence workloads
+primitives/   synchronization and lock-free data-structure exercises
+analysis/     CSV measurements and plot scripts
+docs/         design/build notes and generated figures
 ```
 
 ## AI Use and Tooling
 
 AI-assisted tools were used for implementation support, debugging, and
-documentation. I reviewed and modified the resulting RTL and C++ code and
-validated the design with the model and RTL test suites documented here.
-Build details and development notes are in [TOOLING.md](TOOLING.md).
+documentation. I reviewed the resulting C++ and RTL and validated the behavior
+with the model and Verilator suites described above. Tool versions and host
+notes are recorded in [TOOLING.md](TOOLING.md).

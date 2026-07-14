@@ -1,52 +1,37 @@
-# Building and running
+# Building and Running
 
 ## Requirements
 
-- Verilator 5.x (tested with 5.040)
-- g++ with C++17 (tested with GCC 15, MSYS2 UCRT64)
-- GNU Make, bash
-- Python 3 for the analysis plots. matplotlib is optional, the scripts fall back
-  to an ASCII summary if it isn't installed.
+- C++17 compiler with pthread support
+- GNU Make and Bash
+- Verilator 5.x
+- Python 3; matplotlib is optional because plot scripts have an ASCII fallback
 
-## Run everything
+## Full verification
 
 ```bash
 bash run_all.sh
 ```
 
-Exit code 0 means all four stages passed:
+The runner returns nonzero if the C++ suite, measurement driver, Verilator
+build/tests, or an analysis script fails.
 
-1. C++ model + layers 3/4/5 test suite
-2. model demo runner (writes the CSVs the analysis scripts read)
-3. Verilator RTL build + testbench
-4. analysis plots
-
-Individual stages:
+Individual targets:
 
 ```bash
-make model-tests   # C++ model + sync primitive + TSO tests
-make model         # demo runner, regenerates analysis CSVs
-make sim           # Verilator RTL testbench
-make lint          # verilator --lint-only
-make analysis      # render the plots
+make model-tests   # C++ model, workload, primitive, and TSO tests
+make model         # internal checks and regenerated analysis CSV files
+make sim           # build and run the Verilator testbench
+make lint          # Verilator lint-only pass
+make analysis      # regenerate plots, or print ASCII data without matplotlib
 ```
 
-## Windows / MSYS2 notes
+Build artifacts are written to `build/` and `obj_dir/`.
 
-I develop this on Windows under MSYS2, which has two traps worth knowing about.
-`run_all.sh` works around both automatically, but if you're running make targets
-by hand:
+## Windows/MSYS2
 
-1. **PATH ordering matters.** If `/mingw64/bin` comes before `/c/msys64/ucrt64/bin`
-   on PATH, `cc1plus.exe` picks up incompatible gmp/mpfr DLLs from the mingw64 tree
-   and dies with exit 1 and *no error message at all*. The symptom is bizarre:
-   `g++ --version` works fine but every actual compile fails instantly with empty
-   stderr. Fix: put `/c/msys64/ucrt64/bin` first.
-
-2. **The `verilator` Perl wrapper can be broken** (`Can't locate Pod/Usage.pm`).
-   The compiled driver works fine, so the build calls `verilator_bin.exe` directly
-   (`VERILATOR ?= verilator_bin.exe` in the Makefile).
-
-On Linux none of this applies. Plain `verilator` + `g++` should just work.
-
-Build artifacts land in `obj_dir/` and `build/`; both are gitignored.
+Run the commands from an MSYS2 shell or invoke its Bash explicitly. The runner
+detects `/c/msys64/ucrt64/bin`, places the UCRT64 toolchain and `/usr/bin` first
+on `PATH`, and selects `verilator_bin.exe`. This avoids mixing MinGW runtimes and
+does not depend on the Perl `verilator` wrapper. Linux uses the normal
+`verilator` executable.

@@ -6,6 +6,8 @@
 #include <thread>
 #include <random>
 #include <fstream>
+#include <algorithm>
+#include <atomic>
 #include "mesi_system.hpp"
 #include "sc_checker.hpp"
 #include "tso.hpp"
@@ -54,11 +56,10 @@ static void sc_stress(int n, int ops_per_core, uint64_t seed, bool race) {
 static void emit_false_sharing_csv() {
     std::ofstream f("analysis/false_sharing.csv");
     f << "offset_bytes,total_bus_txns,bus_rdx,inv_total\n";
-    for (uint32_t off = 0; off <= 128; off += 8) {
+    for (uint32_t off = 4; off <= 128; off += 4) {
         MesiSystem s(2);
         uint32_t a0 = 0x4000;
         uint32_t a1 = 0x4000 + off;
-        if (a1 == a0) a1 = a0 + 4; // keep them distinct words
         false_sharing(s, a0, a1, 100);
         uint64_t inv = s.perf().inv_count[0] + s.perf().inv_count[1];
         f << off << "," << s.perf().total_bus_txns() << ","
@@ -70,28 +71,45 @@ static void emit_false_sharing_csv() {
 // Spinlock bus traffic vs. number of competing cores.
 static void emit_lock_scalability_csv() {
     std::ofstream f("analysis/lock_scalability.csv");
-    f << "cores,total_bus_txns,bus_rdx,bus_upgr\n";
+    f << "cores,acquisitions_per_trial,trials,median_bus_txns_per_acq,"
+         "min_bus_txns_per_acq,max_bus_txns_per_acq,median_total_bus_txns\n";
+    constexpr int K = 500;
+    constexpr int TRIALS = 7;
     for (int n = 1; n <= 4; ++n) {
-        MesiSystem s(n);
-        uint32_t LOCK = 0x100, CTR = 0x200;
-        s.bus().register_addr(LOCK); s.bus().register_addr(CTR);
-        s.write(0, LOCK, 0); s.write(0, CTR, 0);
-        TASLock lk{LOCK};
-        const int K = 500;
-        auto worker = [&](int core) {
-            Dut d{&s, core};
-            for (int i = 0; i < K; ++i) {
-                lk.lock(d);
-                uint32_t v = d.read(CTR); d.write(CTR, v + 1);
-                lk.unlock(d);
-            }
-        };
-        std::vector<std::thread> ts;
-        for (int c = 0; c < n; ++c) ts.emplace_back(worker, c);
-        for (auto& t : ts) t.join();
-        expect(s.read(0, CTR) == (uint32_t)(n * K), "lock scalability counter exact");
-        f << n << "," << s.perf().total_bus_txns() << ","
-          << s.perf().bus_rdx_count << "," << s.perf().bus_upgr_count << "\n";
+        std::vector<uint64_t> totals;
+        for (int trial = 0; trial < TRIALS; ++trial) {
+            MesiSystem s(n);
+            uint32_t LOCK = 0x100, CTR = 0x200;
+            s.bus().register_addr(LOCK); s.bus().register_addr(CTR);
+            s.write(0, LOCK, 0); s.write(0, CTR, 0);
+            TASLock lk{LOCK};
+            std::atomic<int> ready{0};
+            std::atomic<bool> go{false};
+            auto worker = [&](int core) {
+                Dut d{&s, core};
+                ready.fetch_add(1, std::memory_order_release);
+                while (!go.load(std::memory_order_acquire)) std::this_thread::yield();
+                for (int i = 0; i < K; ++i) {
+                    lk.lock(d);
+                    uint32_t v = d.read(CTR); d.write(CTR, v + 1);
+                    lk.unlock(d);
+                }
+            };
+            std::vector<std::thread> ts;
+            for (int c = 0; c < n; ++c) ts.emplace_back(worker, c);
+            while (ready.load(std::memory_order_acquire) < n) std::this_thread::yield();
+            go.store(true, std::memory_order_release);
+            for (auto& t : ts) t.join();
+            expect(s.read(0, CTR) == (uint32_t)(n * K),
+                   "lock scalability counter exact");
+            totals.push_back(s.perf().total_bus_txns());
+        }
+        std::sort(totals.begin(), totals.end());
+        const double denom = double(n * K);
+        const uint64_t median = totals[TRIALS / 2];
+        f << n << "," << n * K << "," << TRIALS << ","
+          << median / denom << "," << totals.front() / denom << ","
+          << totals.back() / denom << "," << median << "\n";
     }
     std::printf("  wrote analysis/lock_scalability.csv\n");
 }

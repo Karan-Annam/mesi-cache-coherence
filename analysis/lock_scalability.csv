@@ -1,0 +1,5 @@
+cores,acquisitions_per_trial,trials,median_bus_txns_per_acq,min_bus_txns_per_acq,max_bus_txns_per_acq,median_total_bus_txns
+1,500,7,0.004,0.004,0.004,2
+2,1000,7,0.034,0.014,0.056,34
+3,1500,7,0.042,0.0346667,0.0473333,63
+4,2000,7,0.0455,0.038,0.073,91
