@@ -14,10 +14,7 @@ Host quirks (MSYS2 PATH ordering, a broken Perl `verilator` wrapper) are in
 
 ## AI use
 
-I wrote the RTL and the C++ model with AI assistance, then debugged it
-myself and read through it to modify things as needed, the MESI FSM's race
-handling and the sequential-consistency checker in particular took a few
-passes to get right.
-
-Ask me about the MESI FSM, the SC checker, or the store buffer, happy to go
-deeper on any of it.
+AI-assisted tools were used for implementation support, debugging, and
+documentation. I reviewed and modified the resulting RTL and C++ model and
+validated them with the model and RTL test suites. The MESI FSM's race handling
+and the sequential-consistency checker required several debugging passes.

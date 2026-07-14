@@ -94,5 +94,7 @@ docs/         DESIGN.md, BUILDING.md, images
 
 ## AI Use and Tooling
 
-These docs were drafted with AI assistance and edited by me. Code-level AI
-use and the build toolchain are in [TOOLING.md](TOOLING.md).
+AI-assisted tools were used for implementation support, debugging, and
+documentation. I reviewed and modified the resulting RTL and C++ code and
+validated the design with the model and RTL test suites documented here.
+Build details and development notes are in [TOOLING.md](TOOLING.md).
